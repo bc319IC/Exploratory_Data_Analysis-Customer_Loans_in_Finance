@@ -140,7 +140,7 @@ class DataTransform():
 
         Parameters
         ----------
-        column_name
+        col_name
 
         Returns
         -------
@@ -154,7 +154,7 @@ class DataTransform():
 
         Parameters
         ----------
-        column_name
+        col_name
 
         Returns
         -------
@@ -168,7 +168,7 @@ class DataTransform():
 
         Parameters
         ----------
-        column_name
+        col_name
 
         Returns
         -------
@@ -182,7 +182,7 @@ class DataTransform():
 
         Parameters
         ----------
-        column_name
+        col_name
 
         Returns
         -------
@@ -196,7 +196,7 @@ class DataTransform():
 
         Parameters
         ----------
-        column_name
+        col_name
 
         Returns
         -------
@@ -205,6 +205,17 @@ class DataTransform():
         self.df[col_name] = self.df[col_name].astype(bool)
 
     def convert_term_to_numeric(self, col_name):
+        '''
+        Converts the column type to numeric by extracting only the digits part of a string.
+
+        Parameters
+        ----------
+        col_name
+
+        Returns
+        -------
+        None
+        '''
         self.df[col_name] = self.df[col_name].str.extract('(\d+)')
 
 
@@ -231,7 +242,7 @@ class DataFrameInfo():
 
         Returns
         -------
-        df.dtypes
+        None
         '''
         print("DataFrame dtypes: \n", self.df.dtypes)
     
@@ -245,11 +256,11 @@ class DataFrameInfo():
 
         Returns
         -------
-        df.describe()
+        None
         '''
         print("DataFrame described: \n", self.df.describe())
     
-    def count_distinct_values(self):
+    def count_distinct_vals(self):
         '''
         Counts the distinct values in the categorical columns.
 
@@ -259,7 +270,7 @@ class DataFrameInfo():
 
         Returns
         -------
-        distinct_vals
+        None
         '''
         distinct_vals = {}
         for col in self.df.select_dtypes(include=['category']):
@@ -276,11 +287,11 @@ class DataFrameInfo():
 
         Returns
         -------
-        shape
+        None
         '''
         print("DataFrame shape: \n", self.df.shape)
     
-    def count_null_values(self):
+    def count_null_vals(self):
         '''
         Finds the number and percentage of nulls in the dataframe.
 
@@ -317,7 +328,7 @@ class DataFrameTransform(DataFrameInfo):
 
         Parameters
         ----------
-        threshold - 0 to 1
+        threshold - 0 to 100
 
         Returns
         -------
@@ -333,25 +344,40 @@ class DataFrameTransform(DataFrameInfo):
 
         Parameters
         ----------
-        strategy - mean or median or mode
+        strategy - 'mean' or 'median' or 'mode'
 
         Returns
         -------
         None
         '''
+        # Mean
         if strategy == 'mean':
             mean_value = self.df[col_name].mean()
             self.df[col_name].fillna(mean_value, inplace=True)
+        # Median
         elif strategy == 'median':
             median_value = self.df[col_name].median()
             self.df[col_name].fillna(median_value, inplace=True)
+        # Mode
         elif strategy == 'mode':
             mode_value = self.df[col_name].mode()[0]
             self.df[col_name].fillna(mode_value, inplace=True)
         else:
             raise ValueError("Invalid imputation strategy. Please choose 'mean' or 'median' or 'mode'.")
         
-    def identify_skewed_columns(self, excluded_cols, threshold=0.5):
+    def identify_skewed_cols(self, excluded_cols, threshold=0.5):
+        '''
+        Identifies which columns have skew above the threshold and to be considered 'skewed' columns.
+        Prints the column names and skewness.
+
+        Parameters
+        ----------
+        excluded_cols, threshold - 0 to 1
+
+        Returns
+        -------
+        skewed_cols
+        '''
         numeric_cols = self.df.select_dtypes(include=[np.number]).columns
         numeric_cols = [col for col in numeric_cols if col not in excluded_cols]
         skewness = self.df[numeric_cols].skew()
@@ -359,13 +385,27 @@ class DataFrameTransform(DataFrameInfo):
         print(skewed_cols,'\n', skewness)
         return skewed_cols
     
-    def transform_skewed_columns(self, col_name, transform='yeojohnson'):
+    def transform_skewed_cols(self, col_name, transform='yeojohnson'):
+        '''
+        Transforms the column using the specified transform method.
+
+        Parameters
+        ----------
+        col_name, transform - 'log' or 'boxcox' or 'yeojohnson'
+
+        Returns
+        -------
+        None
+        '''
+        # Log
         if transform == 'log':
             self.df[col_name + '_log'] = self.df[col_name].map(lambda i: np.log(i) if i > 0 else 0)
+        # Box-cox
         elif transform == 'boxcox':
             boxcoxed = self.df[col_name]
             boxcoxed = stats.boxcox(boxcoxed)
             self.df[col_name + '_boxcox'] = pd.Series(boxcoxed[0])
+        # Yeo-Johnson
         elif transform == 'yeojohnson':
             yeojohnsoned = self.df[col_name]
             yeojohnsoned = stats.yeojohnson(yeojohnsoned)
@@ -374,6 +414,17 @@ class DataFrameTransform(DataFrameInfo):
             raise ValueError("Invalid transform. Please choose 'log' or 'boxcox' or 'yeojohnson'.")
 
     def remove_outliers(self, excluded_cols, threshold=3):
+        '''
+        Removes outliers from the dataframe above the z score threshold.
+
+        Parameters
+        ----------
+        excluded_cols, threshold
+
+        Returns
+        -------
+        None
+        '''
         numeric_cols = self.df.select_dtypes(include=[np.number]).columns
         numeric_cols = [col for col in numeric_cols if col not in excluded_cols]
         outlier_indices = set()
@@ -387,6 +438,46 @@ class DataFrameTransform(DataFrameInfo):
         # Remove rows with z-scores above threshold
         self.df = self.df.drop(index=outlier_indices, axis=0, inplace=True)
 
+    def get_highly_correlated_cols(self, excluded_cols, threshold=0.9):
+        '''
+        Gets the highly correlated columns.
+
+        Parameters
+        ----------
+        excluded_cols, threshold - 0 to 1
+
+        Returns
+        -------
+        to_drop
+        '''
+        # Select only numerical columns for the correlation matrix
+        numerical_df = self.df.select_dtypes(include=[np.number])
+        numerical_df = numerical_df.drop(columns=excluded_cols)
+        # Compute the correlation matrix
+        corr_matrix = numerical_df.corr().abs()
+        # Select upper triangle of correlation matrix
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))
+        # Find index of feature columns with correlation greater than the threshold
+        to_drop = [column for column in upper.columns if any(upper[column] > threshold)]
+        print(f"Columns to drop: {to_drop}")
+        return to_drop
+
+    def remove_highly_correlated_cols(self, excluded_cols, threshold=0.9):
+        '''
+        Removes the highly correlated columns.
+
+        Parameters
+        ----------
+        excluded_cols, threshold - 0 to 1
+
+        Returns
+        -------
+        None
+        '''
+        # Drop the columns returned from get_highly_correlated_cols
+        to_drop = self.get_highly_correlated_cols(excluded_cols, threshold)
+        self.df.drop(columns=to_drop, inplace=True)
+        print(f"Removed columns: {to_drop}")
 
 class Plotter():
 
@@ -401,13 +492,35 @@ class Plotter():
         '''
         self.df = df
 
-    def visualise_missing_values(self):
+    def visualise_missing_vals(self):
+        '''
+        Visualise the nulls for each column in the dataframe.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        '''
         plt.figure(figsize=(10, 6))
         sns.heatmap(self.df.isnull(), cmap='viridis', cbar=False, yticklabels=False)
         plt.title('Nulls in DataFrame')
         plt.show()
 
     def visualise_skew(self, excluded_cols):
+        '''
+        Visualise the skew for each column in the dataframe.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        '''
         numeric_cols = self.df.select_dtypes(include=[np.number]).columns
         numeric_cols = [col for col in numeric_cols if col not in excluded_cols]
 
@@ -417,39 +530,72 @@ class Plotter():
         g = g.map(sns.histplot, "value", kde=True)
 
     def visualise_qq(self, col_name):
+        '''
+        Visualise the qq plot for a column.
+
+        Parameters
+        ----------
+        col_name
+
+        Returns
+        -------
+        None
+        '''
         qq_plot = qqplot(self.df[col_name] , scale=1 ,line='q', fit=True)
         plt.show()
     
     def visualise_transformed(self, col_name, cols_w_zero):
-            plt.figure(figsize=(12, 4))
-            # Log
-            plt.subplot(1, 3, 1)
-            logged = self.df[col_name].map(lambda i: np.log(i) if i > 0 else 0)
-            l = sns.histplot(logged,label="Skewness: %.2f"%(logged.skew()) )
-            l.legend()
-            plt.title('log ' + col_name)
-            # Box-cox
-            plt.subplot(1, 3, 2)
-            if col_name not in cols_w_zero: #remove columns with zeros
-                boxcoxed = self.df[col_name]
-                boxcoxed = stats.boxcox(boxcoxed)
-                boxcoxed = pd.Series(boxcoxed[0])
-                bc=sns.histplot(boxcoxed,label="Skewness: %.2f"%(boxcoxed.skew()) )
-                bc.legend()
-                plt.title('bc ' + col_name)
-            # Yeo-Johnson
-            plt.subplot(1, 3, 3)
-            yeojohnsoned = self.df[col_name]
-            yeojohnsoned = stats.yeojohnson(yeojohnsoned)
-            yeojohnsoned = pd.Series(yeojohnsoned[0])
-            yj=sns.histplot(yeojohnsoned,label="Skewness: %.2f"%(yeojohnsoned.skew()) )
-            yj.legend()
-            plt.title('yj ' + col_name)
+        '''
+        Visualise the skew for a column that has undergone log, box-cox and yeo-johnson transforms.
 
-            plt.tight_layout()
-            plt.show()
+        Parameters
+        ----------
+        col_name, cols_w_zero
+
+        Returns
+        -------
+        None
+        '''
+        plt.figure(figsize=(12, 4))
+        # Log
+        plt.subplot(1, 3, 1)
+        logged = self.df[col_name].map(lambda i: np.log(i) if i > 0 else 0)
+        l = sns.histplot(logged,label="Skewness: %.2f"%(logged.skew()) )
+        l.legend()
+        plt.title('log ' + col_name)
+        # Box-cox
+        plt.subplot(1, 3, 2)
+        if col_name not in cols_w_zero: #remove columns with zeros
+            boxcoxed = self.df[col_name]
+            boxcoxed = stats.boxcox(boxcoxed)
+            boxcoxed = pd.Series(boxcoxed[0])
+            bc=sns.histplot(boxcoxed,label="Skewness: %.2f"%(boxcoxed.skew()) )
+            bc.legend()
+            plt.title('bc ' + col_name)
+        # Yeo-Johnson
+        plt.subplot(1, 3, 3)
+        yeojohnsoned = self.df[col_name]
+        yeojohnsoned = stats.yeojohnson(yeojohnsoned)
+        yeojohnsoned = pd.Series(yeojohnsoned[0])
+        yj=sns.histplot(yeojohnsoned,label="Skewness: %.2f"%(yeojohnsoned.skew()) )
+        yj.legend()
+        plt.title('yj ' + col_name)
+
+        plt.tight_layout()
+        plt.show()
 
     def visualise_outliers(self, excluded_cols):
+        '''
+        Visualise the outliers for each column in the dataframe.
+
+        Parameters
+        ----------
+        excluded_cols
+
+        Returns
+        -------
+        None
+        '''
         numeric_cols = self.df.select_dtypes(include=[np.number]).columns
         numeric_cols = [col for col in numeric_cols if col not in excluded_cols]
         for col in numeric_cols:
@@ -457,6 +603,50 @@ class Plotter():
             sns.boxplot(x=self.df[col])
             plt.title(f'Boxplot of {col}')
             plt.show()
+
+    def plot_categorical_cols(self):
+        '''
+        Plots bar charts for each categorical type column in the dataframe.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        '''
+        # Identify categorical columns
+        categorical_columns = self.df.select_dtypes(include=['object', 'category']).columns
+        # Iterate over categorical columns and plot bar plots
+        for column in categorical_columns:
+            plt.figure(figsize=(4, 3))
+            sns.countplot(data=self.df, x=column)
+            plt.title(f'Bar plot of {column}')
+            plt.xticks(rotation=90)
+            plt.show()
+
+    def visualise_correlation_matrix(self):
+        '''
+        Visualise the correlation matrix of the dataframe.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        '''
+        # Select only numerical columns for the correlation matrix
+        numerical_df = self.df.select_dtypes(include=[np.number])
+        # Compute the correlation matrix
+        corr_matrix = numerical_df.corr()
+        # Plot the heatmap
+        plt.figure(figsize=(10, 6))
+        sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm')
+        plt.title('Correlation Matrix')
+        plt.show()
 
 if __name__ == '__main__':
     #Save the CVS file from RDS Database

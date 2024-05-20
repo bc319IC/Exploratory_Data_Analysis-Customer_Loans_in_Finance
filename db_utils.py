@@ -650,10 +650,8 @@ class Plotter():
 
 if __name__ == '__main__':
     #Save the CVS file from RDS Database
-    """
     creds = load_creds()
     rds = RDSDatabaseConnector(creds)
     engine = rds.initialise_engine()
     df_temp = rds.extract_data_to_dataframe('loan_payments')
     rds.save_dataframe_to_csv(df_temp, 'loan_payments.csv')
-    """

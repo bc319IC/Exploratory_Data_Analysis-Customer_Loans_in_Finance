@@ -334,7 +334,7 @@ class DataFrameTransform(DataFrameInfo):
         -------
         None
         '''
-        null_counts, null_percentage = self.count_null_values()
+        null_counts, null_percentage = self.count_null_vals()
         columns_to_drop = null_percentage[null_percentage > threshold].index
         self.df.drop(columns_to_drop, axis=1, inplace=True)
     
@@ -647,6 +647,225 @@ class Plotter():
         sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm')
         plt.title('Correlation Matrix')
         plt.show()
+
+
+class LoanAnalysis:
+    def __init__(self, df):
+        self.df = df.copy()
+        self.total_funded_amount = self.df['funded_amount'].sum()
+        self.total_funded_amount_inv = self.df['funded_amount_inv'].sum()
+        self.total_payment_received = self.df['total_payment'].sum()
+        self.total_recoveries = self.df['recoveries'].sum()
+        self.total_collection_recovery_fee = self.df['collection_recovery_fee'].sum()
+        self.total_recovered = self.total_payment_received + self.total_recoveries + self.total_collection_recovery_fee
+
+    def calculate_recovery_percentages(self):
+        percent_recovered_total = (self.total_recovered / self.total_funded_amount) * 100
+        percent_recovered_inv = (self.total_recovered / self.total_funded_amount_inv) * 100
+        return percent_recovered_total, percent_recovered_inv
+
+    def plot_recovery_percentages(self):
+        percent_recovered_total, percent_recovered_inv = self.calculate_recovery_percentages()
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        categories = ['Total Funded Amount', 'Investor Funded Amount']
+        percentages = [percent_recovered_total, percent_recovered_inv]
+
+        ax.bar(categories, percentages, color=['blue', 'green'])
+        ax.set_ylabel('Percentage Recovered (%)')
+        ax.set_title('Percentage of Loans Recovered')
+        for index, percent in enumerate(percentages):
+            ax.text(index, percent, f"{percent:.2f}%", ha='center')
+
+        plt.show()
+
+    def estimate_future_recoveries(self, months=6):
+        # Assuming constant recovery rate
+        term_total_months = self.df['term'].sum()
+        monthly_recovery_rate = self.total_recovered / term_total_months
+        estimated_future_recoveries = [monthly_recovery_rate * i for i in range(1, months + 1)]
+        cumulative_recoveries = np.cumsum(estimated_future_recoveries)
+        cumulative_percentage_recovered = (cumulative_recoveries / self.total_funded_amount) * 100
+        return cumulative_percentage_recovered
+
+    def plot_future_recoveries(self, months=6):
+        cumulative_percentage_recovered = self.estimate_future_recoveries(months)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        month_labels = [f'Month {i}' for i in range(1, months + 1)]
+        ax.plot(month_labels, cumulative_percentage_recovered, marker='o', linestyle='-')
+        ax.set_ylabel('Cumulative Percentage Recovered (%)')
+        ax.set_title('Projected Cumulative Recoveries Over Next 6 Months')
+        for index, percent in enumerate(cumulative_percentage_recovered):
+            ax.text(index, percent, f"{percent:.10f}%", ha='center')
+
+        plt.show()
+
+    def calculate_charged_off_statistics(self):
+        charged_off_loans = self.df[self.df['loan_status'] == 'Charged Off']
+        total_charged_off_loans = len(charged_off_loans)
+        total_loans = len(self.df)
+        percent_charged_off = (total_charged_off_loans / total_loans) * 100
+        total_paid_before_charged_off = charged_off_loans['total_payment'].sum()
+        return percent_charged_off, total_paid_before_charged_off
+
+    def calculate_monthly_payment(self, loan_amount, annual_rate, term):
+        monthly_rate = annual_rate / 12 / 100
+        payment = loan_amount * monthly_rate * (1 + monthly_rate)**term / ((1 + monthly_rate)**term - 1)
+        return payment
+
+    def calculate_remaining_term(self):
+        # Function to calculate the remaining term based on amortization schedule
+        def remaining_term(row):
+            loan_amount = row['loan_amount']
+            annual_rate = row['int_rate']
+            term = row['term']
+            total_payment_received = row['total_payment']
+            
+            monthly_payment = self.calculate_monthly_payment(loan_amount, annual_rate, term)
+            
+            # Calculate the remaining balance after the received payments
+            remaining_balance = loan_amount
+            months_paid = 0
+            while remaining_balance > 0 and months_paid < term:
+                interest_payment = remaining_balance * (annual_rate / 12 / 100)
+                principal_payment = monthly_payment - interest_payment
+                remaining_balance -= principal_payment
+                total_payment_received -= monthly_payment
+                if total_payment_received < 0:
+                    break
+                months_paid += 1
+            
+            return term - months_paid
+
+        self.df['remaining_term'] = self.df.apply(remaining_term, axis=1)
+
+    def calculate_projected_loss(self, loans):
+        loans = loans.copy()  # Create a copy to avoid SettingWithCopyWarning
+        loans['remaining_principal'] = loans.apply(
+            lambda row: row['loan_amount'] * (row['remaining_term'] / row['term']), axis=1
+        )
+        
+        loans['monthly_interest'] = loans['remaining_principal'] * (loans['int_rate'] / 12 / 100)
+        loans['potential_interest_loss'] = loans['monthly_interest'] * loans['remaining_term']
+
+        total_principal_loss = loans['remaining_principal'].sum()
+        total_potential_interest_loss = loans['potential_interest_loss'].sum()
+        total_projected_loss = total_principal_loss + total_potential_interest_loss
+
+        return total_principal_loss, total_potential_interest_loss, total_projected_loss
+    
+    def analyse_charged_off_loans(self):
+        self.calculate_remaining_term()
+        charged_off_loans = self.df[self.df['loan_status'] == 'Charged Off']
+        total_principal_loss, total_potential_interest_loss, total_projected_loss = self.calculate_projected_loss(charged_off_loans)
+        return total_principal_loss, total_potential_interest_loss, total_projected_loss
+
+    def plot_projected_charged_off_loss(self):
+        self.calculate_remaining_term()
+        charged_off_loans = self.df[self.df['loan_status'] == 'Charged Off'].copy()
+        
+        # Calculate remaining principal
+        charged_off_loans['remaining_principal'] = charged_off_loans.apply(
+            lambda row: row['loan_amount'] * (row['remaining_term'] / row['term']), axis=1
+        )
+        
+        # Calculate monthly interest and potential interest loss
+        charged_off_loans['monthly_interest'] = charged_off_loans['remaining_principal'] * (charged_off_loans['int_rate'] / 12 / 100)
+        charged_off_loans['potential_interest_loss'] = charged_off_loans['monthly_interest'] * charged_off_loans['remaining_term']
+
+        # Calculate cumulative losses
+        charged_off_loans['cumulative_principal_loss'] = charged_off_loans['remaining_principal'].cumsum()
+        charged_off_loans['cumulative_potential_interest_loss'] = charged_off_loans['potential_interest_loss'].cumsum()
+        charged_off_loans['cumulative_total_loss'] = charged_off_loans['cumulative_principal_loss'] + charged_off_loans['cumulative_potential_interest_loss']
+        
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.plot(charged_off_loans['remaining_term'], charged_off_loans['cumulative_total_loss'], marker='o', linestyle='-')
+        ax.set_xlabel('Remaining Term (Months)')
+        ax.set_ylabel('Cumulative Projected Loss ($)')
+        ax.set_title('Projected Cumulative Loss Over Remaining Term of Charged Off Loans')
+        plt.show()
+
+    def identify_at_risk_loans(self):
+        at_risk_statuses = ['Late (31-120 days)', 'Late (16-30 days)', 'In Grace Period', 'Default']
+        at_risk_loans = self.df[self.df['loan_status'].isin(at_risk_statuses)]
+        return at_risk_loans
+
+    def analyse_at_risk_loans(self):
+        at_risk_loans = self.identify_at_risk_loans()
+        total_loans = len(self.df)
+        at_risk_loan_count = len(at_risk_loans)
+        at_risk_percentage = (at_risk_loan_count / total_loans) * 100
+
+        self.calculate_remaining_term()
+        at_risk_loans = self.df[self.df['loan_status'].isin(['Late (31-120 days)', 'Late (16-30 days)', 'In Grace Period', 'Default'])]
+        
+        total_principal_loss, total_potential_interest_loss, total_projected_loss = self.calculate_projected_loss(at_risk_loans)
+
+        return at_risk_percentage, total_principal_loss, total_potential_interest_loss, total_projected_loss
+    
+    def calculate_total_expected_revenue(self):
+        self.calculate_remaining_term()
+        self.df['total_expected_payment'] = self.df.apply(
+            lambda row: self.calculate_monthly_payment(row['loan_amount'], row['int_rate'], row['term']) * row['term'], axis=1
+        )
+        total_expected_revenue = self.df['total_expected_payment'].sum()
+        return total_expected_revenue
+    
+    def analyse_combined_loss(self):
+        at_risk_percentage, at_risk_principal_loss, at_risk_interest_loss, at_risk_projected_loss = self.analyse_at_risk_loans()
+        charged_off_loans = self.df[self.df['loan_status'] == 'Charged Off']
+        charged_off_principal_loss, charged_off_interest_loss, charged_off_projected_loss = self.calculate_projected_loss(charged_off_loans)
+        
+        combined_projected_loss = at_risk_projected_loss + charged_off_projected_loss
+        total_expected_revenue = self.calculate_total_expected_revenue()
+        combined_loss_percentage = (combined_projected_loss / total_expected_revenue) * 100
+
+        return combined_loss_percentage, combined_projected_loss
+    
+    def identify_charged_off_loans(self):
+        charged_off_loans = self.df[self.df['loan_status'] == 'Charged Off']
+        return charged_off_loans
+
+    def analyze_loan_indicators(self):
+        at_risk_loans = self.identify_at_risk_loans()
+        charged_off_loans = self.identify_charged_off_loans()
+
+        # Combine both subsets for comparison
+        at_risk_loans['status'] = 'At Risk'
+        charged_off_loans['status'] = 'Charged Off'
+        combined = pd.concat([at_risk_loans, charged_off_loans])
+
+        # Visualize indicators
+        fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(10, 18))
+
+        # Grade
+        sns.countplot(data=combined, x='grade', hue='status', ax=axes[0])
+        axes[0].set_title('Loan Grade Distribution')
+        axes[0].set_xlabel('Grade')
+        axes[0].set_ylabel('Count')
+
+        # Purpose
+        sns.countplot(data=combined, x='purpose', hue='status', ax=axes[1])
+        axes[1].set_title('Loan Purpose Distribution')
+        axes[1].set_xlabel('Purpose')
+        axes[1].set_ylabel('Count')
+        axes[1].tick_params(axis='x', rotation=45)
+
+        # Home Ownership
+        sns.countplot(data=combined, x='home_ownership', hue='status', ax=axes[2])
+        axes[2].set_title('Home Ownership Distribution')
+        axes[2].set_xlabel('Home Ownership')
+        axes[2].set_ylabel('Count')
+
+        plt.tight_layout()
+        plt.show()
+
+        # Summary of findings
+        summary = combined.groupby(['status', 'grade', 'purpose', 'home_ownership']).size().unstack(fill_value=0)
+        return summary
+
+
 
 if __name__ == '__main__':
     #Save the CVS file from RDS Database

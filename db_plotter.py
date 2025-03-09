@@ -106,7 +106,6 @@ class Plotter():
         yj=sns.histplot(yeojohnsoned,label="Skewness: %.2f"%(yeojohnsoned.skew()) )
         yj.legend()
         plt.title('yj ' + col_name)
-
         plt.tight_layout()
         plt.show()
 
@@ -124,11 +123,20 @@ class Plotter():
         '''
         numeric_cols = self.df.select_dtypes(include=[np.number]).columns
         numeric_cols = [col for col in numeric_cols if col not in excluded_cols]
-        for col in numeric_cols:
-            plt.figure(figsize=(4, 3))
-            sns.boxplot(x=self.df[col])
-            plt.title(f'Boxplot of {col}')
-            plt.show()
+        num_cols = len(numeric_cols)
+        num_rows = (num_cols // 3) + (num_cols % 3 > 0)  # Adjust rows dynamically
+        fig, axes = plt.subplots(num_rows, 3, figsize=(12, 4 * num_rows))  # Adjust figure size
+        axes = axes.flatten()  # Flatten to handle indexing easily
+
+        # Iterate over numerical columns and plot boxplots
+        for i, col in enumerate(numeric_cols):
+            sns.boxplot(x=self.df[col], ax=axes[i])
+            axes[i].set_title(f'Boxplot of {col}')
+        # Hide any unused subplots
+        for j in range(i + 1, len(axes)):
+            fig.delaxes(axes[j])
+        plt.tight_layout()  # Adjust layout for better spacing
+        plt.show()
 
     def plot_categorical_cols(self):
         '''
@@ -144,7 +152,8 @@ class Plotter():
         '''
         # Identify categorical columns
         categorical_columns = self.df.select_dtypes(include=['object', 'category']).columns
-        # Iterate over categorical columns and plot bar plots
+
+        # Iterate over categorical columns and plot bar plots 
         for column in categorical_columns:
             plt.figure(figsize=(4, 3))
             sns.countplot(data=self.df, x=column)
@@ -168,6 +177,7 @@ class Plotter():
         numerical_df = self.df.select_dtypes(include=[np.number])
         # Compute the correlation matrix
         corr_matrix = numerical_df.corr()
+
         # Plot the heatmap
         plt.figure(figsize=(10, 6))
         sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm')
